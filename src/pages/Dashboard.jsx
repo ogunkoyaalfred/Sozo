@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { db } from "../firebase/config";
@@ -13,6 +14,16 @@ import {
   deleteDoc,
   updateDoc,
 } from "firebase/firestore";
+import {
+  faCircleCheck,
+  faHourglassHalf,
+  faTrashCan,
+} from "@fortawesome/free-regular-svg-icons";
+import {
+  faArrowRightToBracket,
+  faClockRotateLeft,
+  faPiggyBank,
+} from "@fortawesome/free-solid-svg-icons";
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -60,7 +71,7 @@ const Dashboard = () => {
     try {
       const expenseRef = collection(db, "users", user.uid, "expenses");
       await addDoc(expenseRef, {
-        title: category === "Borrow" ? `Borrowed from ${borrowFrom}` : title,
+        title: title,
         amount: parseFloat(amount),
         category,
         status: category === "Borrow" ? status : null,
@@ -107,7 +118,7 @@ const Dashboard = () => {
           exp.date.getDate() === today.getDate() &&
           exp.date.getMonth() === today.getMonth() &&
           exp.date.getFullYear() === today.getFullYear() &&
-          exp.category !== "Borrow"
+          exp.category !== "Borrow",
       )
       .reduce((acc, exp) => acc + exp.amount, 0);
 
@@ -158,13 +169,13 @@ const Dashboard = () => {
               onClick={() => navigate("/history")}
               className="bg-cyan-700 py-2 px-4 rounded-lg text-white hover:bg-cyan-600 transition"
             >
-              History
+              <FontAwesomeIcon icon={faClockRotateLeft} /> History
             </button>
             <button
               onClick={handleLogout}
               className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"
             >
-              Logout
+              <FontAwesomeIcon icon={faArrowRightToBracket} /> Logout
             </button>
           </div>
         </div>
@@ -177,19 +188,18 @@ const Dashboard = () => {
               ₦
               {expenses
                 .filter((exp) => {
-                  const now = new Date();
-                  const expDate = exp.date;
-                  if (!expDate) return false;
-                  const weekStart = new Date(
-                    now.setDate(now.getDate() - now.getDay())
-                  );
-                  const weekEnd = new Date(weekStart);
-                  weekEnd.setDate(weekEnd.getDate() + 6);
-                  return (
-                    expDate >= weekStart &&
-                    expDate <= weekEnd &&
-                    exp.category !== "Borrow"
-                  );
+                  if (!exp.date || exp.category === "Borrow") return false;
+
+                  const today = new Date();
+                  const startOfWeek = new Date(today);
+                  startOfWeek.setHours(0, 0, 0, 0);
+                  startOfWeek.setDate(today.getDate() - today.getDay());
+
+                  const endOfWeek = new Date(startOfWeek);
+                  endOfWeek.setDate(startOfWeek.getDate() + 6);
+                  endOfWeek.setHours(23, 59, 59, 999);
+
+                  return exp.date >= startOfWeek && exp.date <= endOfWeek;
                 })
                 .reduce((acc, exp) => acc + exp.amount, 0)}
             </p>
@@ -282,6 +292,7 @@ const Dashboard = () => {
               type="submit"
               className="w-full bg-cyan-800 hover:bg-cyan-700 text-white py-2 rounded-lg font-medium transition duration-200"
             >
+              <FontAwesomeIcon icon={faPiggyBank} className="mr-2" />
               Add Expense
             </button>
           </form>
@@ -291,7 +302,9 @@ const Dashboard = () => {
         <div className="bg-white p-6 rounded-2xl shadow">
           <h2 className="text-lg font-semibold mb-4 flex justify-between">
             Expenses
-            <span className="text-gray-500 font-normal">Today Total: ₦{dailyTotal}</span>
+            <span className="text-gray-500 font-normal">
+              Today's Total: ₦{dailyTotal}
+            </span>
           </h2>
 
           {expenses.length === 0 ? (
@@ -307,7 +320,9 @@ const Dashboard = () => {
                     <p className="font-medium">{exp.title}</p>
                     <p className="text-sm text-gray-500">
                       {exp.category}
-                      {exp.category === "Borrow" && exp.borrowedFrom && `(from ${exp.borrowedFrom})`}
+                      {exp.category === "Borrow" &&
+                        exp.borrowedFrom &&
+                        `(from ${exp.borrowedFrom})`}
                       {exp.category === "Borrow" && (
                         <span
                           className={`ml-2 text-sm font-medium px-2 py-1 rounded-full ${
@@ -322,18 +337,33 @@ const Dashboard = () => {
                     </p>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className="text-cyan-800 font-semibold">₦{exp.amount}</span>
+                    <span className="text-cyan-800 font-semibold">
+                      ₦{exp.amount}
+                    </span>
                     <button
                       onClick={() =>
-                        exp.category === "Borrow" ? handleToggleStatus(exp) : handleDelete(exp.id)
+                        exp.category === "Borrow"
+                          ? handleToggleStatus(exp)
+                          : handleDelete(exp.id)
                       }
                       className="text-red-500 hover:text-red-600 font-bold"
                     >
-                      {exp.category === "Borrow"
-                        ? exp.status === "Pending"
-                          ? "Mark Paid"
-                          : "Mark Pending"
-                        : "✕"}
+                      {exp.category === "Borrow" ? (
+                        exp.status === "Pending" ? (
+                          <FontAwesomeIcon icon={faCircleCheck} className="text-green-600"/>
+                        ) : (
+                          <FontAwesomeIcon icon={faHourglassHalf} className="text-yellow-600"/>
+                        )
+                      ) : (
+                        ""
+                      )}
+                    </button>
+                    {}
+                    <button
+                      onClick={() => handleDelete(exp.id)}
+                      className="text-red-500 hover:text-red-600 font-bold"
+                    >
+                      <FontAwesomeIcon icon={faTrashCan} />
                     </button>
                   </div>
                 </li>

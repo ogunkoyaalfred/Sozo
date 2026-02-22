@@ -10,6 +10,8 @@ import {
   where,
 } from "firebase/firestore";
 import ExpenseChart from "../components/ExpenseChart";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faCircleArrowLeft } from "@fortawesome/free-solid-svg-icons";
 
 const History = () => {
   const { user } = useAuth();
@@ -66,7 +68,7 @@ const History = () => {
           onClick={() => navigate("/dashboard")}
           className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg transition mb-4"
         >
-          Back to Dashboard
+         <FontAwesomeIcon icon={faCircleArrowLeft}/> Back to Dashboard
         </button>
 
         {/* Filters */}
