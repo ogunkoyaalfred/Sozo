@@ -40,6 +40,7 @@ const Dashboard = () => {
 
   // Expenses state
   const [expenses, setExpenses] = useState([]);
+  const [allExpenses, setAllExpenses] = useState([]);
   const [dailyTotal, setDailyTotal] = useState(0);
   const [today, setToday] = useState(new Date());
 
@@ -92,22 +93,36 @@ const Dashboard = () => {
 
   // Real-time listener
   useEffect(() => {
-    if (!user) return;
+  if (!user) return;
 
-    const expensesRef = collection(db, "users", user.uid, "expenses");
-    const q = query(expensesRef, orderBy("date", "desc"));
+  const expensesRef = collection(db, "users", user.uid, "expenses");
+  const q = query(expensesRef, orderBy("date", "desc"));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        date: doc.data().date?.toDate(),
-      }));
-      setExpenses(data);
-    });
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const data = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+      date: doc.data().date?.toDate(),
+    }));
 
-    return () => unsubscribe();
-  }, [user]);
+    setAllExpenses(data);
+
+    const now = new Date();
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+
+    const todayExpenses = data.filter(
+      (exp) => exp.date && exp.date >= startOfToday
+    );
+
+    setExpenses(todayExpenses);
+  });
+
+  return () => unsubscribe();
+}, [user]);
 
   // Calculate daily total whenever expenses or today changes
   useEffect(() => {
@@ -127,16 +142,16 @@ const Dashboard = () => {
 
   // Reset "today" at midnight
   useEffect(() => {
-    const now = new Date();
-    const msUntilMidnight =
-      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
+  const now = new Date();
+  const msUntilMidnight =
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
 
-    const timer = setTimeout(() => {
-      setToday(new Date());
-    }, msUntilMidnight);
+  const timer = setTimeout(() => {
+    setToday(new Date());
+  }, msUntilMidnight);
 
-    return () => clearTimeout(timer);
-  }, [today]);
+  return () => clearTimeout(timer);
+}, []);
 
   // Delete expense
   const handleDelete = async (id) => {
@@ -186,7 +201,7 @@ const Dashboard = () => {
             <p className="text-sm text-gray-500">This Week</p>
             <p className="text-xl font-bold text-cyan-800">
               ₦
-              {expenses
+              {allExpenses
                 .filter((exp) => {
                   if (!exp.date || exp.category === "Borrow") return false;
 
@@ -209,7 +224,7 @@ const Dashboard = () => {
             <p className="text-sm text-gray-500">This Month</p>
             <p className="text-xl font-bold text-cyan-800">
               ₦
-              {expenses
+              {allExpenses
                 .filter((exp) => {
                   const now = new Date();
                   const expDate = exp.date;
