@@ -24,31 +24,71 @@ import {
   faClockRotateLeft,
   faPiggyBank,
 } from "@fortawesome/free-solid-svg-icons";
+import ReceiptScanner from "../components/ReceiptScanner";
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   // Form state
-  const [title, setTitle] = useState("");
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("Food");
-  const [status, setStatus] = useState("Pending"); // Only for Borrow
-  const [borrowFrom, setBorrowFrom] = useState(""); // For Borrow
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [title, setTitle]         = useState("");
+  const [amount, setAmount]       = useState("");
+  const [category, setCategory]   = useState("Food");
+  const [status, setStatus]       = useState("Pending");
+  const [borrowFrom, setBorrowFrom] = useState("");
+  const [error, setError]         = useState("");
+  const [success, setSuccess]     = useState("");
+
+  // Receipt scanner state
+  const [showScanner, setShowScanner] = useState(false);
+  const [scanBanner, setScanBanner]   = useState(null); // { amount, date, narration }
 
   // Expenses state
-  const [expenses, setExpenses] = useState([]);
+  const [expenses, setExpenses]       = useState([]);
   const [allExpenses, setAllExpenses] = useState([]);
-  const [dailyTotal, setDailyTotal] = useState(0);
-  const [today, setToday] = useState(new Date());
+  const [dailyTotal, setDailyTotal]   = useState(0);
+  const [today, setToday]             = useState(new Date());
 
   // Logout
   const handleLogout = async () => {
     await logout();
     navigate("/login");
   };
+
+  // Called by ReceiptScanner when parsing succeeds
+  // Called by ReceiptScanner when parsing succeeds — auto-saves instantly
+const handleReceiptParsed = async (data) => {
+  console.log("handleReceiptParsed called", data); // 👈
+  
+  if (!data.amount) {
+    setError("Could not read amount from receipt. Please add manually.");
+    setShowScanner(false);
+    return;
+  }
+
+  const resolvedCategory = data.category || "Other";
+  const resolvedTitle    = data.title     || data.narration || "Receipt expense";
+
+  try {
+    const expenseRef = collection(db, "users", user.uid, "expenses");
+    await addDoc(expenseRef, {
+      title:        resolvedTitle,
+      amount:       parseFloat(data.amount),
+      category:     resolvedCategory,
+      status:       null,
+      borrowedFrom: null,
+      date:         serverTimestamp(),
+    });
+
+    console.log("Saved successfully!"); // 👈
+    setScanBanner(data);
+    setShowScanner(false);
+    setSuccess(`✅ Saved! ₦${data.amount.toLocaleString()} · ${resolvedCategory} · "${resolvedTitle}"`);
+  } catch (err) {
+    console.error("Firebase save error:", err); // 👈
+    setError("Receipt scanned but failed to save. Please try again.");
+  }
+};
 
   // Add expense
   const handleAddExpense = async (e) => {
@@ -72,12 +112,12 @@ const Dashboard = () => {
     try {
       const expenseRef = collection(db, "users", user.uid, "expenses");
       await addDoc(expenseRef, {
-        title: title,
-        amount: parseFloat(amount),
+        title:        title,
+        amount:       parseFloat(amount),
         category,
-        status: category === "Borrow" ? status : null,
+        status:       category === "Borrow" ? status : null,
         borrowedFrom: category === "Borrow" ? borrowFrom : null,
-        date: serverTimestamp(),
+        date:         serverTimestamp(),
       });
 
       setTitle("");
@@ -85,6 +125,7 @@ const Dashboard = () => {
       setCategory("Food");
       setStatus("Pending");
       setBorrowFrom("");
+      setScanBanner(null);
       setSuccess("Expense added successfully!");
     } catch (err) {
       setError("Failed to add expense");
@@ -93,47 +134,39 @@ const Dashboard = () => {
 
   // Real-time listener
   useEffect(() => {
-  if (!user) return;
+    if (!user) return;
 
-  const expensesRef = collection(db, "users", user.uid, "expenses");
-  const q = query(expensesRef, orderBy("date", "desc"));
+    const expensesRef = collection(db, "users", user.uid, "expenses");
+    const q = query(expensesRef, orderBy("date", "desc"));
 
-  const unsubscribe = onSnapshot(q, (snapshot) => {
-    const data = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      date: doc.data().date?.toDate(),
-    }));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date?.toDate(),
+      }));
 
-    setAllExpenses(data);
+      setAllExpenses(data);
 
-    const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    );
+      const now          = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const todayExpenses = data.filter((exp) => exp.date && exp.date >= startOfToday);
+      setExpenses(todayExpenses);
+    });
 
-    const todayExpenses = data.filter(
-      (exp) => exp.date && exp.date >= startOfToday
-    );
+    return () => unsubscribe();
+  }, [user]);
 
-    setExpenses(todayExpenses);
-  });
-
-  return () => unsubscribe();
-}, [user]);
-
-  // Calculate daily total whenever expenses or today changes
+  // Calculate daily total
   useEffect(() => {
     const total = expenses
       .filter(
         (exp) =>
           exp.date &&
-          exp.date.getDate() === today.getDate() &&
-          exp.date.getMonth() === today.getMonth() &&
+          exp.date.getDate()     === today.getDate() &&
+          exp.date.getMonth()    === today.getMonth() &&
           exp.date.getFullYear() === today.getFullYear() &&
-          exp.category !== "Borrow",
+          exp.category !== "Borrow"
       )
       .reduce((acc, exp) => acc + exp.amount, 0);
 
@@ -142,16 +175,12 @@ const Dashboard = () => {
 
   // Reset "today" at midnight
   useEffect(() => {
-  const now = new Date();
-  const msUntilMidnight =
-    new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
-
-  const timer = setTimeout(() => {
-    setToday(new Date());
-  }, msUntilMidnight);
-
-  return () => clearTimeout(timer);
-}, []);
+    const now = new Date();
+    const msUntilMidnight =
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
+    const timer = setTimeout(() => setToday(new Date()), msUntilMidnight);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Delete expense
   const handleDelete = async (id) => {
@@ -174,6 +203,7 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="max-w-4xl mx-auto">
+
         {/* Header */}
         <div className="flex justify-between items-center mb-8 gap-2">
           <h1 className="text-2xl font-bold text-cyan-800">
@@ -200,20 +230,16 @@ const Dashboard = () => {
           <div className="bg-white p-4 rounded-2xl shadow text-center">
             <p className="text-sm text-gray-500">This Week</p>
             <p className="text-xl font-bold text-cyan-800">
-              ₦
-              {allExpenses
+              ₦{allExpenses
                 .filter((exp) => {
                   if (!exp.date || exp.category === "Borrow") return false;
-
                   const today = new Date();
                   const startOfWeek = new Date(today);
                   startOfWeek.setHours(0, 0, 0, 0);
                   startOfWeek.setDate(today.getDate() - today.getDay());
-
                   const endOfWeek = new Date(startOfWeek);
                   endOfWeek.setDate(startOfWeek.getDate() + 6);
                   endOfWeek.setHours(23, 59, 59, 999);
-
                   return exp.date >= startOfWeek && exp.date <= endOfWeek;
                 })
                 .reduce((acc, exp) => acc + exp.amount, 0)}
@@ -223,14 +249,13 @@ const Dashboard = () => {
           <div className="bg-white p-4 rounded-2xl shadow text-center">
             <p className="text-sm text-gray-500">This Month</p>
             <p className="text-xl font-bold text-cyan-800">
-              ₦
-              {allExpenses
+              ₦{allExpenses
                 .filter((exp) => {
-                  const now = new Date();
+                  const now     = new Date();
                   const expDate = exp.date;
                   return (
                     expDate &&
-                    expDate.getMonth() === now.getMonth() &&
+                    expDate.getMonth()    === now.getMonth() &&
                     expDate.getFullYear() === now.getFullYear() &&
                     exp.category !== "Borrow"
                   );
@@ -242,16 +267,41 @@ const Dashboard = () => {
 
         {/* Add Expense Form */}
         <div className="bg-white p-6 rounded-2xl shadow mb-6">
-          <h2 className="text-lg font-semibold mb-4">Add Expense</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold">Add Expense</h2>
+            {/* Scan Receipt toggle button */}
+            <button
+              onClick={() => { setShowScanner((v) => !v); setScanBanner(null); }}
+              className="flex items-center gap-2 bg-cyan-50 border border-cyan-300 text-cyan-700 text-sm px-3 py-1.5 rounded-lg hover:bg-cyan-100 transition"
+            >
+              {showScanner ? "Close Scanner" : "Scan Receipt"}
+            </button>
+          </div>
 
-          {error && (
-            <p className="bg-red-100 text-red-600 p-2 rounded mb-4">{error}</p>
+          {/* Receipt Scanner — shown when toggled */}
+          {showScanner && (
+            <div className="mb-4">
+              <ReceiptScanner onReceiptParsed={handleReceiptParsed} />
+              <p className="text-xs text-gray-400 mt-2 text-center">
+                💡 Tip: When paying, type your narration as{" "}
+                <span className="font-medium text-gray-500">Category - Title</span>
+                {" "}e.g. <span className="italic">Transport - Uber ride</span>
+              </p>
+            </div>
           )}
-          {success && (
-            <p className="bg-green-100 text-green-600 p-2 rounded mb-4">
-              {success}
-            </p>
+
+          {/* Scan result banner */}
+          {scanBanner && (
+            <div className="mb-4 p-3 bg-cyan-50 border border-cyan-200 rounded-xl text-sm text-cyan-800">
+              <p className="font-semibold mb-1">🧾 Scanned from receipt</p>
+              <p>Amount: <span className="font-medium">₦{scanBanner.amount?.toLocaleString()}</span></p>
+              {scanBanner.narration && <p>Narration: <span className="font-medium">{scanBanner.narration}</span></p>}
+              {scanBanner.date      && <p>Date on receipt: <span className="font-medium">{scanBanner.date}</span></p>}
+            </div>
           )}
+
+          {error   && <p className="bg-red-100 text-red-600 p-2 rounded mb-4">{error}</p>}
+          {success && <p className="bg-green-100 text-green-600 p-2 rounded mb-4">{success}</p>}
 
           <form onSubmit={handleAddExpense} className="space-y-4">
             <input
@@ -335,9 +385,7 @@ const Dashboard = () => {
                     <p className="font-medium">{exp.title}</p>
                     <p className="text-sm text-gray-500">
                       {exp.category}
-                      {exp.category === "Borrow" &&
-                        exp.borrowedFrom &&
-                        `(from ${exp.borrowedFrom})`}
+                      {exp.category === "Borrow" && exp.borrowedFrom && ` (from ${exp.borrowedFrom})`}
                       {exp.category === "Borrow" && (
                         <span
                           className={`ml-2 text-sm font-medium px-2 py-1 rounded-full ${
@@ -352,9 +400,7 @@ const Dashboard = () => {
                     </p>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className="text-cyan-800 font-semibold">
-                      ₦{exp.amount}
-                    </span>
+                    <span className="text-cyan-800 font-semibold">₦{exp.amount}</span>
                     <button
                       onClick={() =>
                         exp.category === "Borrow"
@@ -365,15 +411,12 @@ const Dashboard = () => {
                     >
                       {exp.category === "Borrow" ? (
                         exp.status === "Pending" ? (
-                          <FontAwesomeIcon icon={faCircleCheck} className="text-green-600"/>
+                          <FontAwesomeIcon icon={faCircleCheck} className="text-green-600" />
                         ) : (
-                          <FontAwesomeIcon icon={faHourglassHalf} className="text-yellow-600"/>
+                          <FontAwesomeIcon icon={faHourglassHalf} className="text-yellow-600" />
                         )
-                      ) : (
-                        ""
-                      )}
+                      ) : ""}
                     </button>
-                    {}
                     <button
                       onClick={() => handleDelete(exp.id)}
                       className="text-red-500 hover:text-red-600 font-bold"
@@ -386,6 +429,7 @@ const Dashboard = () => {
             </ul>
           )}
         </div>
+
       </div>
     </div>
   );
